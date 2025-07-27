@@ -1,0 +1,6 @@
+fastapi
+uvicorn[standard]
+yt-dlp
+webvtt-py
+openai
+python-multipart
