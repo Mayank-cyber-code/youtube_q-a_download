@@ -4,3 +4,4 @@ yt-dlp
 webvtt-py
 openai
 python-multipart
+wikipedia
