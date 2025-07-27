@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>YouTube Q&A</title>
+  <style>
+    body {
+      min-width: 300px;
+      font-family: Arial, sans-serif;
+      padding: 12px;
+      background: #f9f9f9;
+      color: #222;
+    }
+    label {
+      font-weight: bold;
+      display: block;
+      margin-top: 10px;
+      margin-bottom: 4px;
+    }
+    input[type="text"], textarea {
+      width: 100%;
+      padding: 6px 8px;
+      box-sizing: border-box;
+      font-size: 14px;
+      border-radius: 4px;
+      border: 1px solid #ccc;
+    }
+    textarea {
+      min-height: 80px;
+      resize: vertical;
+    }
+    button {
+      margin-top: 10px;
+      padding: 8px;
+      width: 100%;
+      font-size: 16px;
+      background-color: #1a73e8;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    button:disabled {
+      background-color: #a0c0f0;
+      cursor: not-allowed;
+    }
+    #answer {
+      margin-top: 15px;
+      white-space: pre-wrap;
+      background: white;
+      border-radius: 6px;
+      border: 1px solid #ddd;
+      padding: 10px;
+      min-height: 80px;
+      font-size: 14px;
+    }
+    #error {
+      margin-top: 10px;
+      color: red;
+      font-weight: bold;
+    }
+  </style>
+</head>
+<body>
+  <label for="video-url">YouTube Video URL:</label>
+  <input type="text" id="video-url" placeholder="https://www.youtube.com/watch?v=..." />
+
+  <label for="question">Your Question:</label>
+  <textarea id="question" placeholder="Ask anything about the video..."></textarea>
+
+  <button id="ask-btn">Ask</button>
+
+  <div id="error"></div>
+  <div id="answer"></div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
