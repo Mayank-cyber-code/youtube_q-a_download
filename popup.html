@@ -5,17 +5,23 @@
   <title>YouTube Q&A</title>
   <style>
     body {
-      min-width: 300px;
+      min-width: 320px;
       font-family: Arial, sans-serif;
       padding: 12px;
       background: #f9f9f9;
       color: #222;
     }
+    h1 {
+      font-size: 18px;
+      margin-bottom: 12px;
+      color: #1a73e8;
+      text-align: center;
+    }
     label {
       font-weight: bold;
       display: block;
       margin-top: 10px;
-      margin-bottom: 4px;
+      margin-bottom: 6px;
     }
     input[type="text"], textarea {
       width: 100%;
@@ -30,7 +36,7 @@
       resize: vertical;
     }
     button {
-      margin-top: 10px;
+      margin-top: 14px;
       padding: 8px;
       width: 100%;
       font-size: 16px;
@@ -39,13 +45,14 @@
       border: none;
       border-radius: 4px;
       cursor: pointer;
+      transition: background-color 0.25s ease;
     }
     button:disabled {
       background-color: #a0c0f0;
       cursor: not-allowed;
     }
     #answer {
-      margin-top: 15px;
+      margin-top: 16px;
       white-space: pre-wrap;
       background: white;
       border-radius: 6px;
@@ -53,25 +60,49 @@
       padding: 10px;
       min-height: 80px;
       font-size: 14px;
+      max-height: 200px;
+      overflow-y: auto;
     }
     #error {
       margin-top: 10px;
       color: red;
       font-weight: bold;
+      min-height: 20px;
+      text-align: center;
+    }
+    footer {
+      margin-top: 18px;
+      text-align: center;
+      font-size: 12px;
+      color: #555;
+      user-select: none;
+    }
+    footer a {
+      color: #1a73e8;
+      text-decoration: none;
+    }
+    footer a:hover {
+      text-decoration: underline;
     }
   </style>
 </head>
 <body>
+  <h1>YouTube Q&A</h1>
+
   <label for="video-url">YouTube Video URL:</label>
-  <input type="text" id="video-url" placeholder="https://www.youtube.com/watch?v=..." />
+  <input type="text" id="video-url" placeholder="Switch to a YouTube video tab to auto-fill" aria-label="YouTube Video URL" />
 
   <label for="question">Your Question:</label>
-  <textarea id="question" placeholder="Ask anything about the video..."></textarea>
+  <textarea id="question" placeholder="Ask anything about the video..." aria-label="Question about the video"></textarea>
 
-  <button id="ask-btn">Ask</button>
+  <button id="ask-btn" disabled>Ask</button>
 
   <div id="error"></div>
   <div id="answer"></div>
+
+  <footer>
+    Powered by your <a href="https://render.com" target="_blank" rel="noopener noreferrer">Render</a> backend and OpenAI
+  </footer>
 
   <script src="popup.js"></script>
 </body>
