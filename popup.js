@@ -4,8 +4,53 @@ const questionInput = document.getElementById('question');
 const answerDiv = document.getElementById('answer');
 const errorDiv = document.getElementById('error');
 
-// Use your deployed Render web service URL here (example Render URL)
-const BACKEND_API_URL = "https://youtube-q-a-download.onrender.com/api/ask";
+const BACKEND_API_URL = "https://youtube-q-a-download.onrender.com/api/ask"; // Update with your backend URL
+
+// Utility: Check if URL matches YouTube video pattern and extract video URL
+function isYouTubeVideoUrl(url) {
+  // Basic check - adjust if needed
+  return /^https?:\/\/(www\.)?youtube\.com\/watch\?v=[\w-]{11}/.test(url) ||
+         /^https?:\/\/youtu\.be\/[\w-]{11}/.test(url) ||
+         /^https?:\/\/(www\.)?youtube\.com\/shorts\/[\w-]{11}/.test(url);
+}
+
+// Get the currently active tab in the last focused chrome window
+function getActiveYouTubeTabUrl() {
+  return new Promise((resolve) => {
+    chrome.windows.getLastFocused({ populate: true }, (window) => {
+      if (!window || !window.tabs) {
+        resolve(null);
+        return;
+      }
+      // Find active tab which is also a YouTube video page
+      const activeTab = window.tabs.find(tab => tab.active);
+      if (activeTab && isYouTubeVideoUrl(activeTab.url)) {
+        resolve(activeTab.url);
+        return;
+      }
+      // No active tab is YouTube video url
+      resolve(null);
+    });
+  });
+}
+
+// Function to update UI based on whether we're on YouTube video tab
+async function initializePopup() {
+  const youtubeUrl = await getActiveYouTubeTabUrl();
+  if (youtubeUrl) {
+    // Prefill input with url and enable button
+    videoUrlInput.value = youtubeUrl;
+    errorDiv.textContent = '';
+    askBtn.disabled = false;
+  } else {
+    videoUrlInput.value = '';
+    errorDiv.textContent = 'Please switch to a YouTube video tab to ask questions.';
+    askBtn.disabled = true;
+  }
+}
+
+// On popup open, try to get the active YouTube video URL
+initializePopup();
 
 askBtn.addEventListener('click', async () => {
   const video_url = videoUrlInput.value.trim();
@@ -15,7 +60,7 @@ askBtn.addEventListener('click', async () => {
   errorDiv.textContent = '';
 
   if (!video_url || !question) {
-    errorDiv.textContent = 'Please enter both YouTube video URL and a question.';
+    errorDiv.textContent = 'Please enter both YouTube video URL and your question.';
     return;
   }
 
