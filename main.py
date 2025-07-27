@@ -21,7 +21,7 @@ if not OPENAI_API_KEY:
 
 # Optional YouTube cookies content from env variable
 YTDLP_COOKIES_CONTENT = os.getenv("YTDLP_COOKIES_CONTENT")
-COOKIES_PATH = "/app/cookies.txt"
+COOKIES_PATH = "cookies.txt"
 
 # Write cookies to file if content is present and file doesn't exist yet
 if YTDLP_COOKIES_CONTENT and not os.path.exists(COOKIES_PATH):
