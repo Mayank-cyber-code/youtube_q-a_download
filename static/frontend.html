@@ -121,9 +121,7 @@
       try {
         const response = await fetch('/api/ask', {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ video_url: videoUrl, question }),
         });
 
@@ -152,7 +150,7 @@
       }
     });
 
-    // Optional: allow pressing Enter in question textarea to submit
+    // Allow pressing Enter in question textarea to submit (Shift+Enter for new line)
     questionInput.addEventListener('keydown', (event) => {
       if (event.key === 'Enter' && !event.shiftKey) {
         event.preventDefault();
