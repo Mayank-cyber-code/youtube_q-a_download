@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>YouTube Q&A</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 40px auto;
+      max-width: 640px;
+      padding: 0 1rem;
+      background: #f9f9f9;
+      color: #222;
+    }
+    h1 {
+      text-align: center;
+      color: #1a73e8;
+    }
+    label {
+      font-weight: bold;
+      display: block;
+      margin-top: 1.5rem;
+      margin-bottom: 0.5rem;
+    }
+    input[type="text"], textarea {
+      width: 100%;
+      padding: 8px 12px;
+      font-size: 1rem;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      box-sizing: border-box;
+      resize: vertical;
+    }
+    textarea {
+      min-height: 100px;
+    }
+    button {
+      margin-top: 1.5rem;
+      padding: 10px 20px;
+      font-size: 1rem;
+      color: white;
+      background-color: #1a73e8;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    button:disabled {
+      background-color: #a0c0f0;
+      cursor: not-allowed;
+    }
+    #answer {
+      margin-top: 2rem;
+      white-space: pre-wrap;
+      background: white;
+      padding: 1rem;
+      border-radius: 8px;
+      border: 1px solid #ddd;
+      min-height: 100px;
+    }
+    #error {
+      margin-top: 1rem;
+      color: red;
+      font-weight: bold;
+    }
+    footer {
+      margin-top: 3rem;
+      text-align: center;
+      color: #888;
+      font-size: 0.9rem;
+    }
+    a.link {
+      color: #1a73e8;
+      text-decoration: none;
+    }
+    a.link:hover {
+      text-decoration: underline;
+    }
+  </style>
+</head>
+<body>
+  <h1>YouTube Q&A</h1>
+
+  <label for="video-url">YouTube Video URL:</label>
+  <input type="text" id="video-url" placeholder="https://www.youtube.com/watch?v=..." />
+
+  <label for="question">Your Question:</label>
+  <textarea id="question" placeholder="Ask anything about the video..."></textarea>
+
+  <button id="ask-button">Ask</button>
+
+  <div id="error"></div>
+  <div id="answer"></div>
+
+  <footer>
+    Powered by your <a href="https://render.com" target="_blank" class="link">Render</a> backend and OpenAI
+  </footer>
+
+  <script>
+    const askButton = document.getElementById('ask-button');
+    const videoUrlInput = document.getElementById('video-url');
+    const questionInput = document.getElementById('question');
+    const answerDiv = document.getElementById('answer');
+    const errorDiv = document.getElementById('error');
+
+    askButton.addEventListener('click', async () => {
+      const videoUrl = videoUrlInput.value.trim();
+      const question = questionInput.value.trim();
+
+      answerDiv.textContent = '';
+      errorDiv.textContent = '';
+
+      if (!videoUrl || !question) {
+        errorDiv.textContent = 'Please enter both YouTube video URL and your question.';
+        return;
+      }
+
+      askButton.disabled = true;
+      askButton.textContent = 'Asking...';
+
+      try {
+        const response = await fetch('/api/ask', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ video_url: videoUrl, question }),
+        });
+
+        if (!response.ok) {
+          const err = await response.json();
+          errorDiv.textContent = err.detail || 'Error: Failed to get answer.';
+          askButton.disabled = false;
+          askButton.textContent = 'Ask';
+          return;
+        }
+
+        const data = await response.json();
+
+        if (data.error) {
+          errorDiv.textContent = data.error;
+        } else if (data.answer) {
+          answerDiv.textContent = data.answer;
+        } else {
+          answerDiv.textContent = 'No answer received. Try another question.';
+        }
+      } catch (e) {
+        errorDiv.textContent = 'Network or server error. Please try again later.';
+      } finally {
+        askButton.disabled = false;
+        askButton.textContent = 'Ask';
+      }
+    });
+
+    // Optional: allow pressing Enter in question textarea to submit
+    questionInput.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' && !event.shiftKey) {
+        event.preventDefault();
+        askButton.click();
+      }
+    });
+  </script>
+</body>
+</html>
