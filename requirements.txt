@@ -6,13 +6,12 @@ openai
 python-multipart
 wikipedia
 langchain
-faiss-cpu  # (or faiss-gpu if needed)
+faiss-cpu  # or faiss-gpu for GPU servers
 langchain-community
+langchain-openai  # safer for deprecation, optional but recommended
 tiktoken
 matplotlib
 wordcloud
 scikit-learn
 textblob
 transformers
-wikipedia
-python -m textblob.download_corpora
