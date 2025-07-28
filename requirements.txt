@@ -5,3 +5,5 @@ webvtt-py
 openai
 python-multipart
 wikipedia
+langchain
+faiss-cpu  # (or faiss-gpu if needed)
