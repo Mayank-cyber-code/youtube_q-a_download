@@ -4,12 +4,20 @@ import re
 import yt_dlp
 import webvtt
 import wikipedia
+import logging
+
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-import logging
-import openai
+
+from langchain.schema import Document
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain.embeddings.openai import OpenAIEmbeddings
+from langchain.vectorstores import FAISS
+from langchain.chains import RetrievalQA
+from langchain.chat_models import ChatOpenAI
+
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -19,15 +27,11 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 if not OPENAI_API_KEY:
     raise Exception("OPENAI_API_KEY environment variable not set")
 
-# Initialize OpenAI client (new SDK 1.x+)
-client = openai.OpenAI(api_key=OPENAI_API_KEY)
-
 # --- Handle YouTube cookies ---
 COOKIES_PATH = "cookies.txt"  # relative path
 
 YTDLP_COOKIES_CONTENT = os.getenv("YTDLP_COOKIES_CONTENT")
 if YTDLP_COOKIES_CONTENT:
-    # Write cookies content to file if not exists
     if not os.path.exists(COOKIES_PATH):
         with open(COOKIES_PATH, "w", encoding="utf-8") as f:
             f.write(YTDLP_COOKIES_CONTENT)
@@ -35,7 +39,6 @@ if YTDLP_COOKIES_CONTENT:
 
 app = FastAPI()
 
-# CORS middleware (allow all; customize as needed)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -43,8 +46,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Serve static frontend files
 app.mount("/static", StaticFiles(directory="static"), name="static")
+
 
 @app.get("/")
 def serve_frontend():
@@ -60,7 +63,6 @@ def extract_video_id(url: str) -> str:
     patterns = [
         r"(?:v=|/videos/|embed/|youtu\.be/|shorts/)([a-zA-Z0-9_-]{11})"
     ]
-    
     for pattern in patterns:
         match = re.search(pattern, url)
         if match:
@@ -71,7 +73,7 @@ def extract_video_id(url: str) -> str:
 def download_vtt_and_info(video_url: str, tmpdir: str):
     video_id = extract_video_id(video_url)
     expected_vtt = os.path.join(tmpdir, f"{video_id}.en.vtt")
-    
+
     ydl_opts = {
         "skip_download": True,
         "writeautomaticsub": True,
@@ -81,8 +83,7 @@ def download_vtt_and_info(video_url: str, tmpdir: str):
         "quiet": True,
         "no_warnings": True,
     }
-    
-    # Add cookiefile option if cookies file exists
+
     if os.path.exists(COOKIES_PATH):
         ydl_opts["cookiefile"] = COOKIES_PATH
         logger.info(f"Using YouTube cookies: {COOKIES_PATH}")
@@ -91,18 +92,18 @@ def download_vtt_and_info(video_url: str, tmpdir: str):
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(video_url, download=True)
-        
+
         if os.path.isfile(expected_vtt):
             logger.info(f"Found subtitle file: {expected_vtt}")
             return expected_vtt, info
-        
+
         # fallback to any .vtt in tmpdir
         for fname in os.listdir(tmpdir):
             if fname.endswith(".vtt"):
                 vtt_path = os.path.join(tmpdir, fname)
                 logger.info(f"Found subtitle file (fallback): {vtt_path}")
                 return vtt_path, info
-                
+
     except Exception as e:
         err_msg = str(e).lower()
         if "confirm you're not a bot" in err_msg or "sign in" in err_msg or "authentication" in err_msg:
@@ -134,10 +135,6 @@ def parse_transcript_from_vtt(vtt_path: str) -> str:
 
 
 def get_wikipedia_summary(query: str) -> str:
-    """
-    Search and get the Wikipedia summary for the given query.
-    Returns empty string if not found or error.
-    """
     try:
         search_results = wikipedia.search(query)
         if not search_results:
@@ -150,30 +147,6 @@ def get_wikipedia_summary(query: str) -> str:
     except Exception as e:
         logger.warning(f"Wikipedia search failed for query '{query}': {e}")
         return ""
-
-
-def ask_openai(question: str, context: str = "", model: str = "gpt-3.5-turbo") -> str:
-    messages = [
-        {
-            "role": "system",
-            "content": (
-                "You are a helpful assistant capable of answering questions about YouTube videos "
-                "using the given transcript, Wikipedia summary, title, or description, in English."
-            ),
-        }
-    ]
-    if context:
-        messages.append({"role": "user", "content": f"Context:\n{context}"})
-    messages.append({"role": "user", "content": f"Q: {question}\nA:"})
-
-    try:
-        completion = client.chat.completions.create(
-            model=model, messages=messages, temperature=0.2, max_tokens=350
-        )
-        return completion.choices[0].message.content.strip()
-    except Exception as e:
-        logger.error(f"OpenAI API call failed: {e}")
-        return f"Error from OpenAI: {e}"
 
 
 @app.post("/api/ask")
@@ -197,18 +170,38 @@ async def api_ask(request: Request):
             title = (yt_info.get("title") if yt_info else "") or ""
             description = (yt_info.get("description") if yt_info else "") or ""
 
+            # Prepare documents for LangChain ingestion
+            documents = []
+
             if transcript:
-                context = transcript
-            elif title or description:
+                # Create Document with transcript text
+                documents.append(Document(page_content=transcript, metadata={"source": video_url}))
+            else:
+                # Fall back to Wikipedia summary or metadata
                 wiki_summary = get_wikipedia_summary(title)
                 if wiki_summary:
-                    context = wiki_summary
+                    documents.append(Document(page_content=wiki_summary, metadata={"source": "wikipedia"}))
                 else:
-                    context = f"Video title: {title}\nDescription: {description}"
-            else:
-                context = ""
+                    # Use title and description as small context
+                    base_context = f"Video title: {title}\nDescription: {description}"
+                    documents.append(Document(page_content=base_context, metadata={"source": video_url}))
 
-            answer = ask_openai(question, context)
+            # Split documents into chunks for vector store
+            text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
+            split_docs = text_splitter.split_documents(documents)
+
+            # Embed and create FAISS vector store
+            embeddings = OpenAIEmbeddings(openai_api_key=OPENAI_API_KEY)
+            vector_store = FAISS.from_documents(split_docs, embeddings)
+
+            # Setup LangChain QA chain
+            chat_model = ChatOpenAI(model_name="gpt-3.5-turbo", openai_api_key=OPENAI_API_KEY)
+            retriever = vector_store.as_retriever()
+            qa_chain = RetrievalQA.from_chain_type(llm=chat_model, chain_type="stuff", retriever=retriever)
+
+            # Retrieve answer
+            answer = qa_chain.run(question)
+
             return JSONResponse({"answer": answer})
 
     except ValueError as ve:
