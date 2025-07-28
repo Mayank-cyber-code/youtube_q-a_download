@@ -51,7 +51,7 @@
       background-color: #a0c0f0;
       cursor: not-allowed;
     }
-    #answer {
+    #answer, #eda-results, #benchmark-log {
       margin-top: 16px;
       white-space: pre-wrap;
       background: white;
@@ -62,6 +62,14 @@
       font-size: 14px;
       max-height: 200px;
       overflow-y: auto;
+      overflow-wrap: break-word;
+    }
+    #wordcloud {
+      display: block;
+      max-width: 100%;
+      margin: 12px auto 0 auto;
+      border-radius: 8px;
+      box-shadow: 0 0 8px rgba(0,0,0,0.1);
     }
     #error {
       margin-top: 10px;
@@ -84,24 +92,55 @@
     footer a:hover {
       text-decoration: underline;
     }
+    .section {
+      margin-top: 24px;
+      border-top: 1px solid #ddd;
+      padding-top: 16px;
+    }
   </style>
 </head>
 <body>
   <h1>YouTube Q&A</h1>
 
   <label for="video-url">YouTube Video URL:</label>
-  <input type="text" id="video-url" placeholder="Switch to a YouTube video tab to auto-fill" aria-label="YouTube Video URL" />
+  <input
+    type="text"
+    id="video-url"
+    placeholder="Switch to a YouTube video tab to auto-fill"
+    aria-label="YouTube Video URL"
+  />
 
   <label for="question">Your Question:</label>
-  <textarea id="question" placeholder="Ask anything about the video..." aria-label="Question about the video"></textarea>
+  <textarea
+    id="question"
+    placeholder="Ask anything about the video..."
+    aria-label="Question about the video"
+  ></textarea>
 
   <button id="ask-btn" disabled>Ask</button>
 
   <div id="error"></div>
   <div id="answer"></div>
 
+  <!-- EDA Section -->
+  <div class="section">
+    <h2>Exploratory Data Analysis</h2>
+    <button id="eda-btn">Analyze Transcript</button>
+    <div id="eda-results"></div>
+    <img id="wordcloud" alt="Wordcloud" style="display:none;" />
+  </div>
+
+  <!-- Benchmark Log Section -->
+  <div class="section">
+    <h2>Q&A Benchmark Log</h2>
+    <button id="benchmark-btn">Load Benchmark Log</button>
+    <pre id="benchmark-log"></pre>
+  </div>
+
   <footer>
-    Powered by your <a href="https://render.com" target="_blank" rel="noopener noreferrer">Render</a> backend and OpenAI
+    Powered by your
+    <a href="https://render.com" target="_blank" rel="noopener noreferrer">Render</a>
+    backend and OpenAI
   </footer>
 
   <script src="popup.js"></script>
