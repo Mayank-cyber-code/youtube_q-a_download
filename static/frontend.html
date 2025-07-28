@@ -36,7 +36,7 @@
       min-height: 100px;
     }
     button {
-      margin-top: 1.5rem;
+      margin-top: 1rem;
       padding: 10px 20px;
       font-size: 1rem;
       color: white;
@@ -49,14 +49,22 @@
       background-color: #a0c0f0;
       cursor: not-allowed;
     }
-    #answer {
-      margin-top: 2rem;
+    #answer, #edaResults, #benchmarkLog {
+      margin-top: 1.5rem;
       white-space: pre-wrap;
       background: white;
       padding: 1rem;
       border-radius: 8px;
       border: 1px solid #ddd;
       min-height: 100px;
+      overflow-wrap: break-word;
+    }
+    #wordcloud {
+      display: block;
+      max-width: 100%;
+      margin: 1rem auto 0 auto;
+      border-radius: 8px;
+      box-shadow: 0 0 8px rgba(0,0,0,0.1);
     }
     #error {
       margin-top: 1rem;
@@ -76,6 +84,11 @@
     a.link:hover {
       text-decoration: underline;
     }
+    .section {
+      margin-top: 2rem;
+      padding-top: 1rem;
+      border-top: 1px solid #ddd;
+    }
   </style>
 </head>
 <body>
@@ -92,23 +105,43 @@
   <div id="error"></div>
   <div id="answer"></div>
 
+  <!-- EDA Section -->
+  <div class="section">
+    <h2>Exploratory Data Analysis</h2>
+    <button id="eda-button">Analyze Transcript</button>
+    <div id="edaResults"></div>
+    <img id="wordcloud" alt="Wordcloud" style="display:none;" />
+  </div>
+
+  <!-- Benchmark Log Section -->
+  <div class="section">
+    <h2>Q&A Benchmark Log</h2>
+    <button id="benchmark-button">Load Benchmark Log</button>
+    <pre id="benchmarkLog" style="max-height: 300px; overflow-y: auto;"></pre>
+  </div>
+
   <footer>
     Powered by your <a href="https://render.com" target="_blank" class="link">Render</a> backend and OpenAI
   </footer>
 
   <script>
     const askButton = document.getElementById('ask-button');
+    const edaButton = document.getElementById('eda-button');
+    const benchmarkButton = document.getElementById('benchmark-button');
     const videoUrlInput = document.getElementById('video-url');
     const questionInput = document.getElementById('question');
     const answerDiv = document.getElementById('answer');
     const errorDiv = document.getElementById('error');
+    const edaResultsDiv = document.getElementById('edaResults');
+    const wordcloudImg = document.getElementById('wordcloud');
+    const benchmarkLogPre = document.getElementById('benchmarkLog');
 
     askButton.addEventListener('click', async () => {
+      errorDiv.textContent = '';
+      answerDiv.textContent = '';
+
       const videoUrl = videoUrlInput.value.trim();
       const question = questionInput.value.trim();
-
-      answerDiv.textContent = '';
-      errorDiv.textContent = '';
 
       if (!videoUrl || !question) {
         errorDiv.textContent = 'Please enter both YouTube video URL and your question.';
@@ -128,8 +161,6 @@
         if (!response.ok) {
           const err = await response.json();
           errorDiv.textContent = err.detail || 'Error: Failed to get answer.';
-          askButton.disabled = false;
-          askButton.textContent = 'Ask';
           return;
         }
 
@@ -147,6 +178,82 @@
       } finally {
         askButton.disabled = false;
         askButton.textContent = 'Ask';
+      }
+    });
+
+    edaButton.addEventListener('click', async () => {
+      errorDiv.textContent = '';
+      edaResultsDiv.textContent = '';
+      wordcloudImg.style.display = 'none';
+
+      const videoUrl = videoUrlInput.value.trim();
+      if (!videoUrl) {
+        errorDiv.textContent = 'Please enter the YouTube video URL for EDA.';
+        return;
+      }
+
+      edaButton.disabled = true;
+      edaButton.textContent = 'Analyzing...';
+
+      try {
+        const response = await fetch('/api/eda', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ video_url: videoUrl }),
+        });
+
+        if (!response.ok) {
+          const err = await response.json();
+          errorDiv.textContent = err.detail || 'Error: Failed to get EDA.';
+          return;
+        }
+
+        const data = await response.json();
+
+        let edaHtml = `
+          <strong>Word Count:</strong> ${data.eda.word_count} <br/>
+          <strong>Unique Words:</strong> ${data.eda.unique_words} <br/>
+          <strong>Avg. Sentence Length:</strong> ${data.eda.avg_sentence_len} <br/>
+          <strong>Sentiment (Polarity):</strong> ${data.eda.sentiment.polarity} <br/>
+          <strong>Sentiment (Subjectivity):</strong> ${data.eda.sentiment.subjectivity} <br/>
+          <strong>Top Common Words:</strong> ${data.eda.common_words.map(w => w[0]).join(', ')} <br/>
+          <strong>TF-IDF Keywords:</strong> ${data.eda.tfidf_keywords.join(', ')} <br/>
+          <strong>Summary:</strong> ${data.summary}
+        `;
+
+        edaResultsDiv.innerHTML = edaHtml;
+
+        if (data.wordcloud_base64) {
+          wordcloudImg.src = "data:image/png;base64," + data.wordcloud_base64;
+          wordcloudImg.style.display = '';
+        }
+      } catch (e) {
+        errorDiv.textContent = 'Network or server error. Please try again later.';
+      } finally {
+        edaButton.disabled = false;
+        edaButton.textContent = 'Analyze Transcript';
+      }
+    });
+
+    benchmarkButton.addEventListener('click', async () => {
+      errorDiv.textContent = '';
+      benchmarkLogPre.textContent = '';
+      benchmarkButton.disabled = true;
+      benchmarkButton.textContent = 'Loading...';
+
+      try {
+        const response = await fetch('/api/benchmark_log');
+        if (!response.ok) {
+          errorDiv.textContent = 'Error loading benchmark log.';
+          return;
+        }
+        const data = await response.json();
+        benchmarkLogPre.textContent = JSON.stringify(data.answers_log, null, 2);
+      } catch (e) {
+        errorDiv.textContent = 'Network or server error. Please try again later.';
+      } finally {
+        benchmarkButton.disabled = false;
+        benchmarkButton.textContent = 'Load Benchmark Log';
       }
     });
 
