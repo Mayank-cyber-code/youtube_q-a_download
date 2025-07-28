@@ -9,3 +9,11 @@ langchain
 faiss-cpu  # (or faiss-gpu if needed)
 langchain-community
 tiktoken
+matplotlib
+wordcloud
+scikit-learn
+textblob
+transformers
+wikipedia
+python
+-m textblob.download_corpora
