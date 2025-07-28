@@ -15,5 +15,4 @@ scikit-learn
 textblob
 transformers
 wikipedia
-python
--m textblob.download_corpora
+python -m textblob.download_corpora
