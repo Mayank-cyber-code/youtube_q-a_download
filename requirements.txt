@@ -7,3 +7,4 @@ python-multipart
 wikipedia
 langchain
 faiss-cpu  # (or faiss-gpu if needed)
+langchain-community
