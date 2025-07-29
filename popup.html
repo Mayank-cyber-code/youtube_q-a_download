@@ -15,7 +15,7 @@
     h1 {
       font-size: 18px;
       margin-bottom: 12px;
-      color: #1a73e8;
+      color: #1a73f8;
       text-align: center;
     }
     label {
@@ -33,15 +33,15 @@
       border: 1px solid #ccc;
     }
     textarea {
-      min-height: 80px;
       resize: vertical;
+      min-height: 80px;
     }
     button {
       margin-top: 14px;
       padding: 8px;
       width: 100%;
       font-size: 16px;
-      background-color: #1a73e8;
+      background-color: #1a73f8;
       color: white;
       border: none;
       border-radius: 4px;
@@ -60,15 +60,14 @@
       border: 1px solid #ddd;
       padding: 10px;
       min-height: 80px;
-      font-size: 14px;
       max-height: 200px;
       overflow-y: auto;
       overflow-wrap: break-word;
     }
     #wordcloud {
       display: block;
-      max-width: 100%;
       margin: 12px auto 0 auto;
+      max-width: 100%;
       border-radius: 8px;
       box-shadow: 0 0 8px rgba(0,0,0,0.1);
     }
@@ -81,14 +80,14 @@
     }
     footer {
       margin-top: 18px;
-      text-align: center;
       font-size: 12px;
       color: #555;
+      text-align: center;
       user-select: none;
     }
     footer a {
-      color: #1a73e8;
       text-decoration: none;
+      color: #1a73f8;
     }
     footer a:hover {
       text-decoration: underline;
@@ -103,35 +102,24 @@
 <body>
   <h1>YouTube Q&A</h1>
 
-  <label for="video-url">YouTube Video URL:</label>
-  <input
-    type="text"
-    id="video-url"
-    placeholder="Switch to a YouTube video tab to auto-fill"
-    aria-label="YouTube Video URL"
-  />
+  <label for="video-url">YouTube Video URL</label>
+  <input type="text" id="video-url" aria-label="YouTube video URL" placeholder="Switch to YouTube tab to autofill" />
 
-  <label for="question">Your Question:</label>
-  <textarea
-    id="question"
-    placeholder="Ask anything about the video..."
-    aria-label="Question about the video"
-  ></textarea>
+  <label for="question">Your Question</label>
+  <textarea id="question" aria-label="Your question about the video" placeholder="Ask anything about the video..."></textarea>
 
   <button id="ask-btn" disabled>Ask</button>
 
-  <div id="error"></div>
+  <div id="error" role="alert" aria-live="assertive"></div>
   <div id="answer"></div>
 
-  <!-- EDA Section -->
   <div class="section">
     <h2>Exploratory Data Analysis</h2>
     <button id="eda-btn">Analyze Transcript</button>
     <div id="eda-results"></div>
-    <img id="wordcloud" alt="Wordcloud" style="display:none;" />
+    <img id="wordcloud" alt="Wordcloud visualization" style="display:none;" />
   </div>
 
-  <!-- Benchmark Log Section -->
   <div class="section">
     <h2>Q&A Benchmark Log</h2>
     <button id="benchmark-btn">Load Benchmark Log</button>
@@ -139,9 +127,7 @@
   </div>
 
   <footer>
-    Powered by your
-    <a href="https://render.com" target="_blank" rel="noopener noreferrer">Render</a>
-    backend and OpenAI
+    Powered by your <a href="https://render.com" target="_blank" rel="noopener noreferrer">Render</a> backend and OpenAI
   </footer>
 
   <script src="popup.js"></script>
