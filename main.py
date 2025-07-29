@@ -58,7 +58,7 @@ cache = {
 }
 
 # Initialize summarization pipeline (optional)
-summarizer = pipeline("summarization", model="facebook/bart-large-cnn")
+summarizer = pipeline("summarization", model="t5-small")
 
 app = FastAPI()
 
