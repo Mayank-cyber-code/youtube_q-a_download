@@ -59,7 +59,7 @@ if YTDLP_COOKIES_CONTENT and not os.path.exists(COOKIES_PATH):
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
 redis_client = redis.from_url(REDIS_URL, decode_responses=False)
 
-app = FastAPI()
+app = FastAPI(debug=True)
 
 app.add_middleware(
     CORSMiddleware,
