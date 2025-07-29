@@ -6,13 +6,13 @@ openai
 python-multipart
 wikipedia
 langchain-community
-faiss-cpu
 langchain
+faiss-cpu
 tiktoken
 matplotlib
 wordcloud
 scikit-learn
 textblob
-googletrans==4.0.0-rc1
-redis
 sumy
+redis
+deep-translator
