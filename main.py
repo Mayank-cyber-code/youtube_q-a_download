@@ -64,6 +64,13 @@ redis_client = redis.from_url(REDIS_URL, decode_responses=True)
 VECTORSTORE_ROOT = Path("vectorstores")
 VECTORSTORE_ROOT.mkdir(exist_ok=True)
 
+
+import textblob
+try:
+    textblob.download_corpora.download_all()
+except Exception:
+    pass
+
 # ------------------ Redis Helpers ------------------
 
 def redis_set_str(key: str, val: str):
