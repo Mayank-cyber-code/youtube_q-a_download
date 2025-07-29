@@ -1,3 +1,15 @@
+// Generate or get persistent session ID
+function getSessionId() {
+  let sessionId = localStorage.getItem('yt_qna_session_id');
+  if (!sessionId) {
+    sessionId = crypto.randomUUID();
+    localStorage.setItem('yt_qna_session_id', sessionId);
+  }
+  return sessionId;
+}
+
+const sessionId = getSessionId();
+
 const askBtn = document.getElementById('ask-btn');
 const edaBtn = document.getElementById('eda-btn');
 const benchmarkBtn = document.getElementById('benchmark-btn');
@@ -71,7 +83,7 @@ questionInput.addEventListener('input', () => {
   updateAskButtonState();
 });
 
-// Ask Q&A API call
+// Ask Q&A API call with session_id for memory
 askBtn.addEventListener('click', async () => {
   const video_url = videoUrlInput.value.trim();
   const question = questionInput.value.trim();
@@ -91,7 +103,7 @@ askBtn.addEventListener('click', async () => {
     const response = await fetch(BACKEND_API_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ video_url, question }),
+      body: JSON.stringify({ video_url, question, session_id: sessionId }),
     });
 
     if (!response.ok) {
