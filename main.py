@@ -4,6 +4,7 @@ import re
 import json
 import base64
 import logging
+import time
 from io import BytesIO
 from collections import Counter
 
@@ -35,6 +36,10 @@ from sumy.parsers.plaintext import PlaintextParser
 from sumy.nlp.tokenizers import Tokenizer
 from sumy.summarizers.text_rank import TextRankSummarizer
 
+from googletrans import Translator
+import redis
+import pickle
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -50,14 +55,10 @@ if YTDLP_COOKIES_CONTENT and not os.path.exists(COOKIES_PATH):
         f.write(YTDLP_COOKIES_CONTENT)
     logger.info(f"Wrote YouTube cookies to {COOKIES_PATH}")
 
-# --- In-memory cache (swap for Redis for production) ---
-cache = {
-    "embeddings": {},        # video_id -> FAISS vectorstore
-    "transcripts": {},       # video_id -> transcript text
-    "metadata": {},          # video_id -> video metadata dict
-    "answers_log": [],       # list of dicts for benchmarking answers
-    "memory_sessions": {}    # session_id -> ConversationBufferMemory
-}
+REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
+redis_client = redis.from_url(REDIS_URL, decode_responses=False)
+
+translator = Translator()
 
 app = FastAPI()
 
@@ -69,16 +70,30 @@ app.add_middleware(
 )
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
+# --- Redis helper functions ---
 
-@app.get("/")
-def serve_frontend():
-    frontend_path = os.path.join("static", "frontend.html")
-    if os.path.exists(frontend_path):
-        return FileResponse(frontend_path)
-    return JSONResponse(
-        {"error": "Frontend not found. Upload frontend.html to /static."}, status_code=404
-    )
+def redis_set(key: str, value):
+    redis_client.set(key, pickle.dumps(value))
 
+def redis_get(key: str):
+    val = redis_client.get(key)
+    return pickle.loads(val) if val else None
+
+def redis_set_json(key: str, value):
+    redis_client.set(key, json.dumps(value).encode('utf-8'))
+
+def redis_get_json(key: str):
+    val = redis_client.get(key)
+    return json.loads(val.decode('utf-8')) if val else None
+
+def append_answer_log(entry):
+    redis_client.rpush("answers_log", json.dumps(entry))
+
+def get_all_answer_logs():
+    logs = redis_client.lrange("answers_log", 0, -1)
+    return [json.loads(log.decode('utf-8')) if isinstance(log, bytes) else json.loads(log) for log in logs]
+
+# --- Helper functions ---
 
 def extract_video_id(url: str) -> str:
     patterns = [
@@ -89,7 +104,6 @@ def extract_video_id(url: str) -> str:
         if match:
             return match.group(1)
     raise ValueError("Couldn't extract YouTube video ID from URL.")
-
 
 def download_vtt_and_info(video_url: str, tmpdir: str):
     video_id = extract_video_id(video_url)
@@ -113,6 +127,7 @@ def download_vtt_and_info(video_url: str, tmpdir: str):
         if os.path.isfile(expected_vtt):
             logger.info(f"Found subtitle file: {expected_vtt}")
             return expected_vtt, info
+        # fallback to any .vtt in tmpdir
         for fname in os.listdir(tmpdir):
             if fname.endswith(".vtt"):
                 vtt_path = os.path.join(tmpdir, fname)
@@ -127,10 +142,10 @@ def download_vtt_and_info(video_url: str, tmpdir: str):
                 detail=(
                     "This YouTube video requires authentication (cookies). "
                     "Please try a different public video, or ask the app owner to provide valid cookies."
-                ),)
+                ),
+            )
         logger.warning(f"yt-dlp subtitle download failed: {e}")
     return None, info
-
 
 def parse_transcript_from_vtt(vtt_path: str) -> str:
     if not vtt_path or not os.path.isfile(vtt_path):
@@ -145,6 +160,21 @@ def parse_transcript_from_vtt(vtt_path: str) -> str:
         logger.warning(f"Failed to parse VTT file: {e}")
         return ""
 
+def translate_text_to_en(text: str) -> str:
+    try:
+        translated = translator.translate(text, dest='en')
+        return translated.text
+    except Exception as e:
+        logger.warning(f"Translation failed: {e}")
+        return text  # fallback
+
+def get_transcript_and_translate(vtt_path: str) -> str:
+    transcript = parse_transcript_from_vtt(vtt_path)
+    if not transcript.strip():
+        return transcript
+    # Translate transcript to English
+    translated_transcript = translate_text_to_en(transcript)
+    return translated_transcript
 
 def get_wikipedia_summary(query: str) -> str:
     try:
@@ -159,7 +189,6 @@ def get_wikipedia_summary(query: str) -> str:
     except (wikipedia.DisambiguationError, wikipedia.PageError, Exception) as e:
         logger.warning(f"Wikipedia search failed for query '{query}': {e}")
         return ""
-
 
 def transcript_eda_analysis(text: str):
     words = re.findall(r"\b\w+\b", text.lower())
@@ -191,13 +220,11 @@ def transcript_eda_analysis(text: str):
         "sentiment": {"polarity": polarity, "subjectivity": subjectivity}
     }
 
-
 def create_wordcloud_image(text: str):
     wordcloud = WordCloud(width=800, height=400, background_color='white').generate(text)
     buf = BytesIO()
     wordcloud.to_image().save(buf, format='PNG')
-    base64_img = base64.b64encode(buf.getvalue()).decode('utf-8')
-    return base64_img
+    return base64.b64encode(buf.getvalue()).decode('utf-8')
 
 def summarize_text_sumy(text: str, sentences_count: int = 5):
     if not text or len(text.split()) < 20:
@@ -206,6 +233,26 @@ def summarize_text_sumy(text: str, sentences_count: int = 5):
     summarizer = TextRankSummarizer()
     summary = summarizer(parser.document, sentences_count)
     return ' '.join(str(sentence) for sentence in summary)
+
+# Helper functions to serialize/deserialize Langchain messages for memory with Redis
+
+from langchain.schema import messages_from_dict, messages_to_dict
+
+def get_memory(session_id: str) -> ConversationBufferMemory:
+    key = f"memory:{session_id}"
+    data = redis_get_json(key)
+    messages = messages_from_dict(data) if data else []
+    memory = ConversationBufferMemory(
+        memory_key="chat_history",
+        return_messages=True,
+        messages=messages
+    )
+    return memory
+
+def save_memory(session_id: str, memory: ConversationBufferMemory):
+    key = f"memory:{session_id}"
+    data = messages_to_dict(memory.load_memory_messages())
+    redis_set_json(key, data)
 
 @app.post("/api/ask")
 async def api_ask(request: Request):
@@ -216,7 +263,7 @@ async def api_ask(request: Request):
 
     video_url = (data.get("video_url") or "").strip()
     question = (data.get("question") or "").strip()
-    session_id = (data.get("session_id") or "default").strip()  # <-- support session id
+    session_id = (data.get("session_id") or "default").strip()
 
     if not video_url or not question:
         raise HTTPException(status_code=400, detail="Missing video_url or question.")
@@ -228,18 +275,25 @@ async def api_ask(request: Request):
         raise HTTPException(status_code=400, detail=str(ve))
 
     try:
-        if video_id in cache["embeddings"] and video_id in cache["transcripts"]:
-            logger.info(f"Cache hit for video_id={video_id}")
-            transcript = cache["transcripts"][video_id]
-            vector_store = cache["embeddings"][video_id]
-            metadata = cache["metadata"].get(video_id, {})
+        transcript_key = f"transcript:{video_id}"
+        embeddings_key = f"embeddings:{video_id}"
+        metadata_key = f"metadata:{video_id}"
+
+        transcript = redis_get(transcript_key)
+        vector_store = redis_get(embeddings_key)
+        metadata = redis_get_json(metadata_key)
+
+        if transcript and vector_store:
+            logger.info(f"Redis cache hit for video {video_id}")
         else:
             with tempfile.TemporaryDirectory() as tmpdir:
                 vtt_file, yt_info = download_vtt_and_info(video_url, tmpdir)
-                transcript = parse_transcript_from_vtt(vtt_file) if vtt_file else ""
+                transcript = get_transcript_and_translate(vtt_file) if vtt_file else ""
+
                 title = (yt_info.get("title") if yt_info else "") or ""
                 description = (yt_info.get("description") if yt_info else "") or ""
                 metadata = {"title": title, "description": description}
+
                 documents = []
                 if transcript:
                     documents.append(Document(page_content=transcript, metadata={"source": video_url}))
@@ -250,20 +304,19 @@ async def api_ask(request: Request):
                     else:
                         base_context = f"Video title: {title}\nDescription: {description}"
                         documents.append(Document(page_content=base_context, metadata={"source": video_url}))
+
                 text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
                 split_docs = text_splitter.split_documents(documents)
+
                 embeddings = OpenAIEmbeddings(openai_api_key=OPENAI_API_KEY)
                 vector_store = FAISS.from_documents(split_docs, embeddings)
-                cache["transcripts"][video_id] = transcript
-                cache["embeddings"][video_id] = vector_store
-                cache["metadata"][video_id] = metadata
 
-        # === Memory: Use ConversationBufferMemory per session ===
-        if session_id in cache["memory_sessions"]:
-            memory = cache["memory_sessions"][session_id]
-        else:
-            memory = ConversationBufferMemory(memory_key="chat_history", return_messages=True)
-            cache["memory_sessions"][session_id] = memory
+                redis_set(transcript_key, transcript)
+                redis_set(embeddings_key, vector_store)
+                redis_set_json(metadata_key, metadata)
+
+        # Manage conversation memory per session
+        memory = get_memory(session_id)
 
         retriever = vector_store.as_retriever()
         chat_model = ChatOpenAI(model_name="gpt-3.5-turbo", openai_api_key=OPENAI_API_KEY)
@@ -274,25 +327,32 @@ async def api_ask(request: Request):
             memory=memory
         )
 
+        start_time = time.perf_counter()
         result = qa_chain({"question": question})
-        answer = result["answer"] if isinstance(result, dict) and "answer" in result else result
+        latency = time.perf_counter() - start_time
 
-        cache["answers_log"].append({
+        answer = result["answer"] if (isinstance(result, dict) and "answer" in result) else result
+
+        save_memory(session_id, memory)
+
+        # Append log with latency etc.
+        log_entry = {
             "video_id": video_id,
             "video_url": video_url,
             "question": question,
             "answer": answer,
+            "latency_sec": round(latency, 3),
             "session_id": session_id
-        })
+        }
+        append_answer_log(log_entry)
 
-        return JSONResponse({"answer": answer})
+        return JSONResponse({"answer": answer, "latency_sec": round(latency, 3)})
 
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Unexpected error: {e}")
         raise HTTPException(status_code=500, detail="Internal server error.")
-
 
 @app.post("/api/eda")
 async def api_eda(request: Request):
@@ -311,15 +371,15 @@ async def api_eda(request: Request):
         raise HTTPException(status_code=400, detail=str(ve))
 
     try:
-        if video_id in cache["transcripts"]:
-            transcript = cache["transcripts"][video_id]
-        else:
+        transcript_key = f"transcript:{video_id}"
+        transcript = redis_get(transcript_key)
+        if not transcript:
             with tempfile.TemporaryDirectory() as tmpdir:
                 vtt_file, _ = download_vtt_and_info(video_url, tmpdir)
-                transcript = parse_transcript_from_vtt(vtt_file) if vtt_file else ""
+                transcript = get_transcript_and_translate(vtt_file) if vtt_file else ""
             if not transcript:
                 raise HTTPException(status_code=404, detail="Transcript not found.")
-            cache["transcripts"][video_id] = transcript
+            redis_set(transcript_key, transcript)
 
         eda_results = transcript_eda_analysis(transcript)
         wordcloud_img = create_wordcloud_image(transcript)
@@ -346,11 +406,19 @@ async def api_eda(request: Request):
         logger.error(f"Unexpected error in EDA: {e}")
         raise HTTPException(status_code=500, detail="Internal server error.")
 
-
 @app.get("/api/benchmark_log")
 def api_get_benchmark_log():
-    return JSONResponse({"answers_log": cache["answers_log"]})
+    logs = get_all_answer_logs()
+    return JSONResponse({"answers_log": logs})
 
+@app.get("/")
+def serve_frontend():
+    frontend_path = os.path.join("static", "frontend.html")
+    if os.path.exists(frontend_path):
+        return FileResponse(frontend_path)
+    return JSONResponse(
+        {"error": "Frontend not found. Upload frontend.html to /static."}, status_code=404
+    )
 
 if __name__ == "__main__":
     import uvicorn
