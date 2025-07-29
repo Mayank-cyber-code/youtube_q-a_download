@@ -5,8 +5,8 @@ webvtt-py
 openai
 python-multipart
 wikipedia
-langchain-community
 langchain
+langchain-community
 faiss-cpu
 tiktoken
 matplotlib
