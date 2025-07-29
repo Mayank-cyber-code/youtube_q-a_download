@@ -5,6 +5,7 @@ import json
 import base64
 import logging
 import time
+import sys
 from io import BytesIO
 from collections import Counter
 
@@ -36,7 +37,7 @@ from sumy.parsers.plaintext import PlaintextParser
 from sumy.nlp.tokenizers import Tokenizer
 from sumy.summarizers.text_rank import TextRankSummarizer
 
-from googletrans import Translator
+from deep_translator import GoogleTranslator
 import redis
 import pickle
 
@@ -57,8 +58,6 @@ if YTDLP_COOKIES_CONTENT and not os.path.exists(COOKIES_PATH):
 
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
 redis_client = redis.from_url(REDIS_URL, decode_responses=False)
-
-translator = Translator()
 
 app = FastAPI()
 
@@ -127,7 +126,6 @@ def download_vtt_and_info(video_url: str, tmpdir: str):
         if os.path.isfile(expected_vtt):
             logger.info(f"Found subtitle file: {expected_vtt}")
             return expected_vtt, info
-        # fallback to any .vtt in tmpdir
         for fname in os.listdir(tmpdir):
             if fname.endswith(".vtt"):
                 vtt_path = os.path.join(tmpdir, fname)
@@ -161,20 +159,19 @@ def parse_transcript_from_vtt(vtt_path: str) -> str:
         return ""
 
 def translate_text_to_en(text: str) -> str:
+    if not text.strip():
+        return text
     try:
-        translated = translator.translate(text, dest='en')
-        return translated.text
+        translated = GoogleTranslator(source='auto', target='en').translate(text)
+        logger.info("Translated transcript to English using deep_translator.")
+        return translated
     except Exception as e:
         logger.warning(f"Translation failed: {e}")
-        return text  # fallback
+        return text
 
 def get_transcript_and_translate(vtt_path: str) -> str:
     transcript = parse_transcript_from_vtt(vtt_path)
-    if not transcript.strip():
-        return transcript
-    # Translate transcript to English
-    translated_transcript = translate_text_to_en(transcript)
-    return translated_transcript
+    return translate_text_to_en(transcript)
 
 def get_wikipedia_summary(query: str) -> str:
     try:
@@ -233,8 +230,6 @@ def summarize_text_sumy(text: str, sentences_count: int = 5):
     summarizer = TextRankSummarizer()
     summary = summarizer(parser.document, sentences_count)
     return ' '.join(str(sentence) for sentence in summary)
-
-# Helper functions to serialize/deserialize Langchain messages for memory with Redis
 
 from langchain.schema import messages_from_dict, messages_to_dict
 
@@ -315,16 +310,14 @@ async def api_ask(request: Request):
                 redis_set(embeddings_key, vector_store)
                 redis_set_json(metadata_key, metadata)
 
-        # Manage conversation memory per session
         memory = get_memory(session_id)
-
         retriever = vector_store.as_retriever()
         chat_model = ChatOpenAI(model_name="gpt-3.5-turbo", openai_api_key=OPENAI_API_KEY)
 
         qa_chain = ConversationalRetrievalChain.from_llm(
             chat_model,
             retriever,
-            memory=memory
+            memory=memory,
         )
 
         start_time = time.perf_counter()
@@ -335,7 +328,6 @@ async def api_ask(request: Request):
 
         save_memory(session_id, memory)
 
-        # Append log with latency etc.
         log_entry = {
             "video_id": video_id,
             "video_url": video_url,
@@ -399,7 +391,6 @@ async def api_eda(request: Request):
         }
 
         return JSONResponse(response_data)
-
     except HTTPException:
         raise
     except Exception as e:
@@ -416,17 +407,11 @@ def serve_frontend():
     frontend_path = os.path.join("static", "frontend.html")
     if os.path.exists(frontend_path):
         return FileResponse(frontend_path)
-    return JSONResponse(
-        {"error": "Frontend not found. Upload frontend.html to /static."}, status_code=404
-    )
-
-import sys
-# Your other routes here (if any)
+    return JSONResponse({"error": "Frontend not found. Upload frontend.html to /static."}, status_code=404)
 
 @app.get("/python-version")
 def python_version():
     return {"python_version": sys.version}
-
 
 if __name__ == "__main__":
     import uvicorn
