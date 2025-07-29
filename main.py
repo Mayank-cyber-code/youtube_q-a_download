@@ -420,6 +420,14 @@ def serve_frontend():
         {"error": "Frontend not found. Upload frontend.html to /static."}, status_code=404
     )
 
+import sys
+# Your other routes here (if any)
+
+@app.get("/python-version")
+def python_version():
+    return {"python_version": sys.version}
+
+
 if __name__ == "__main__":
     import uvicorn
     port = int(os.environ.get("PORT", 10000))
