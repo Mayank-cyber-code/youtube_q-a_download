@@ -125,6 +125,18 @@
   </footer>
 
   <script>
+    // Generate or get persistent session ID
+    function getSessionId() {
+      let sessionId = localStorage.getItem('yt_qna_session_id');
+      if (!sessionId) {
+        sessionId = crypto.randomUUID();
+        localStorage.setItem('yt_qna_session_id', sessionId);
+      }
+      return sessionId;
+    }
+
+    const sessionId = getSessionId();
+
     const askButton = document.getElementById('ask-button');
     const edaButton = document.getElementById('eda-button');
     const benchmarkButton = document.getElementById('benchmark-button');
@@ -155,7 +167,7 @@
         const response = await fetch('/api/ask', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ video_url: videoUrl, question }),
+          body: JSON.stringify({ video_url: videoUrl, question, session_id: sessionId }),
         });
 
         if (!response.ok) {
