@@ -5,8 +5,8 @@ function getSessionId() {
     if ('randomUUID' in crypto) {
       sessionId = crypto.randomUUID();
     } else {
-      // Fallback for browsers without crypto.randomUUID
-      sessionId = Math.random().toString(36).substring(2, 15) + 
+      // Fallback for older browsers
+      sessionId = Math.random().toString(36).substring(2, 15) +
                   Math.random().toString(36).substring(2, 15);
     }
     localStorage.setItem('yt_qna_session_id', sessionId);
@@ -16,7 +16,7 @@ function getSessionId() {
 
 const sessionId = getSessionId();
 
-// TODO: Change this to your deployed backend URL
+// Change this to your deployed backend URL
 const BACKEND_BASE = "https://youtube-q-a-download.onrender.com";
 const API_BASE = `${BACKEND_BASE}/api`;
 
@@ -42,7 +42,7 @@ function isYouTubeUrl(url) {
          /^https?:\/\/(www\.)?youtube\.com\/shorts\/[\w-]{11}/.test(url);
 }
 
-// Get active YouTube tab URL (Chrome only)
+// Get active YouTube tab URL (only works in Chrome extension context)
 function getActiveYouTubeUrl() {
   return new Promise((resolve) => {
     if (!chrome || !chrome.tabs) return resolve(null);
@@ -58,13 +58,13 @@ function getActiveYouTubeUrl() {
   });
 }
 
-// Update the "Ask" button state based on inputs
+// Update "Ask" button state based on inputs
 function updateAskButtonState() {
-  const isEnabled = (videoInput.value.trim() !== '' && questionInput.value.trim() !== '');
-  askBtn.disabled = !isEnabled;
+  const enabled = videoInput.value.trim() !== '' && questionInput.value.trim() !== '';
+  askBtn.disabled = !enabled;
 }
 
-// Initialize popup: autofill video URL if possible
+// Initialize popup with autofill if possible
 async function initializePopup() {
   const ytUrl = await getActiveYouTubeUrl();
   if (ytUrl) {
@@ -89,7 +89,7 @@ questionInput.addEventListener('input', () => {
   updateAskButtonState();
 });
 
-// Ask handler
+// Ask button click handler
 askBtn.addEventListener('click', async () => {
   errorDiv.textContent = '';
   answerDiv.textContent = '';
@@ -113,8 +113,8 @@ askBtn.addEventListener('click', async () => {
     });
 
     if (!response.ok) {
-      const err = await response.json().catch(() => ({}));
-      errorDiv.textContent = err.detail || 'Failed to get answer.';
+      const errData = await response.json().catch(() => ({}));
+      errorDiv.textContent = errData.detail || 'Failed to get answer.';
       return;
     }
 
@@ -129,7 +129,8 @@ askBtn.addEventListener('click', async () => {
       answerDiv.textContent = 'No answer received from server.';
     }
 
-  } catch {
+  } catch (err) {
+    console.error(err);
     errorDiv.textContent = 'Network error or server unreachable.';
   } finally {
     askBtn.disabled = false;
@@ -137,11 +138,12 @@ askBtn.addEventListener('click', async () => {
   }
 });
 
-// EDA handler
+// EDA button click handler
 edaBtn.addEventListener('click', async () => {
   errorDiv.textContent = '';
   edaResultsDiv.textContent = '';
   wordcloudImg.style.display = 'none';
+  wordcloudImg.src = '';
 
   const video_url = videoInput.value.trim();
 
@@ -161,8 +163,8 @@ edaBtn.addEventListener('click', async () => {
     });
 
     if (!response.ok) {
-      const err = await response.json().catch(() => ({}));
-      errorDiv.textContent = err.detail || 'Failed to get EDA data.';
+      const errData = await response.json().catch(() => ({}));
+      errorDiv.textContent = errData.detail || 'Failed to get EDA data.';
       return;
     }
 
@@ -187,8 +189,8 @@ edaBtn.addEventListener('click', async () => {
       wordcloudImg.src = "data:image/png;base64," + data.wordcloud_base64;
       wordcloudImg.style.display = 'block';
     }
-
-  } catch {
+  } catch (err) {
+    console.error(err);
     errorDiv.textContent = 'Network error or server unreachable.';
   } finally {
     edaBtn.disabled = false;
@@ -196,7 +198,7 @@ edaBtn.addEventListener('click', async () => {
   }
 });
 
-// Benchmark log handler
+// Benchmark log button click handler
 benchmarkBtn.addEventListener('click', async () => {
   errorDiv.textContent = '';
   benchmarkLog.textContent = '';
@@ -216,7 +218,8 @@ benchmarkBtn.addEventListener('click', async () => {
 
     benchmarkLog.textContent = JSON.stringify(data.answers_log, null, 2);
 
-  } catch {
+  } catch (err) {
+    console.error(err);
     errorDiv.textContent = 'Network error or server unreachable.';
   } finally {
     benchmarkBtn.disabled = false;
@@ -224,8 +227,8 @@ benchmarkBtn.addEventListener('click', async () => {
   }
 });
 
-// Submit question on Enter (without Shift)
-questionInput.addEventListener('keydown', e => {
+// Submit question on Enter key without Shift
+questionInput.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.shiftKey) {
     e.preventDefault();
     askBtn.click();
