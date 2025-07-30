@@ -29,8 +29,8 @@
       padding: 6px 8px;
       box-sizing: border-box;
       font-size: 14px;
-      border-radius: 4px;
       border: 1px solid #ccc;
+      border-radius: 4px;
     }
     textarea {
       resize: vertical;
@@ -65,7 +65,7 @@
       overflow-wrap: break-word;
     }
     #wordcloud {
-      display: block;
+      display: none;
       margin: 12px auto 0 auto;
       max-width: 100%;
       border-radius: 8px;
@@ -103,7 +103,7 @@
   <h1>YouTube Q&A</h1>
 
   <label for="video-url">YouTube Video URL</label>
-  <input type="text" id="video-url" aria-label="YouTube video URL" placeholder="Switch to YouTube tab to autofill" />
+  <input id="video-url" type="text" aria-label="YouTube video URL" placeholder="Enter YouTube video URL" />
 
   <label for="question">Your Question</label>
   <textarea id="question" aria-label="Your question about the video" placeholder="Ask anything about the video..."></textarea>
@@ -117,7 +117,7 @@
     <h2>Exploratory Data Analysis</h2>
     <button id="eda-btn">Analyze Transcript</button>
     <div id="eda-results"></div>
-    <img id="wordcloud" alt="Wordcloud visualization" style="display:none;" />
+    <img id="wordcloud" alt="Wordcloud visualization" />
   </div>
 
   <div class="section">
@@ -130,6 +130,213 @@
     Powered by your <a href="https://render.com" target="_blank" rel="noopener noreferrer">Render</a> backend and OpenAI
   </footer>
 
-  <script src="popup.js"></script>
+  <script>
+    // Generate or get persistent session ID
+    function getSessionId() {
+      let sessionId = localStorage.getItem('yt_qna_session');
+      if (!sessionId) {
+        if (crypto.randomUUID) {
+          sessionId = crypto.randomUUID();
+        } else {
+          sessionId = Math.random().toString(36).substring(2) + Math.random().toString(36).substring(2);
+        }
+        localStorage.setItem('yt_qna_session', sessionId);
+      }
+      return sessionId;
+    }
+
+    const sessionId = getSessionId();
+
+    // Update to your deployed backend URL
+    const BACKEND_URL = "https://youtube-q-a-download.com";
+    const API_BASE = `${BACKEND_URL}/api`;
+
+    const askBtn = document.getElementById('ask-btn');
+    const edaBtn = document.getElementById('eda-btn');
+    const benchmarkBtn = document.getElementById('benchmark-btn');
+
+    const videoInput = document.getElementById('video-url');
+    const questionInput = document.getElementById('question');
+
+    const errorDiv = document.getElementById('error');
+    const answerDiv = document.getElementById('answer');
+
+    const edaResultsDiv = document.getElementById('eda-results');
+    const wordcloudImg = document.getElementById('wordcloud');
+
+    const benchmarkLog = document.getElementById('benchmark-log');
+
+    // Validate YouTube URL (basic)
+    function isYouTubeUrl(url) {
+      return /^https?:\/\/(www\.)?youtube\.com\/watch\?v=[\w-]{11}/.test(url) ||
+             /^https?:\/\/youtu\.be\/[\w-]{11}/.test(url) ||
+             /^https?:\/\/(www\.)?youtube\.com\/shorts\/[\w-]{11}/.test(url);
+    }
+
+    function updateAskBtnState() {
+      askBtn.disabled = !(videoInput.value.trim() && questionInput.value.trim());
+    }
+
+    videoInput.addEventListener('input', () => {
+      errorDiv.textContent = '';
+      updateAskBtnState();
+    });
+
+    questionInput.addEventListener('input', () => {
+      errorDiv.textContent = '';
+      updateAskBtnState();
+    });
+
+    updateAskBtnState();
+
+    // Ask button click
+    askBtn.addEventListener('click', async () => {
+      errorDiv.textContent = '';
+      answerDiv.textContent = '';
+
+      let url = videoInput.value.trim();
+      let question = questionInput.value.trim();
+
+      if(!url || !question) {
+        errorDiv.textContent = "Please enter both YouTube video URL and your question.";
+        return;
+      }
+
+      if(!isYouTubeUrl(url)) {
+        errorDiv.textContent = "Please enter a valid YouTube video URL.";
+        return;
+      }
+
+      askBtn.disabled = true;
+      askBtn.textContent = "Asking...";
+
+      try {
+        const res = await fetch(`${API_BASE}/ask`, {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({video_url: url, question: question, session_id: sessionId}),
+        });
+
+        if (!res.ok) {
+          const err = await res.json();
+          errorDiv.textContent = err.detail || "Failed to get answer.";
+          askBtn.disabled = false;
+          askBtn.textContent = "Ask";
+          return;
+        }
+
+        const data = await res.json();
+        answerDiv.textContent = data.answer || "No answer.";
+        if(data.latency_sec) {
+          answerDiv.textContent += `\n\n(Response time: ${data.latency_sec} seconds)`;
+        }
+      } catch (e) {
+        console.error(e);
+        errorDiv.textContent = "Network error or server unreachable.";
+      } finally {
+        askBtn.disabled = false;
+        askBtn.textContent = "Ask";
+      }
+    });
+
+    // EDA button click
+    edaBtn.addEventListener('click', async () => {
+      errorDiv.textContent = "";
+      edaResultsDiv.textContent = "";
+      wordcloudImg.style.display = "none";
+
+      let url = videoInput.value.trim();
+
+      if(!url) {
+        errorDiv.textContent = "Please enter a YouTube video URL.";
+        return;
+      }
+
+      if(!isYouTubeUrl(url)) {
+        errorDiv.textContent = "Please enter a valid YouTube video URL.";
+        return;
+      }
+
+      edaBtn.disabled = true;
+      edaBtn.textContent = "Analyzing...";
+
+      try {
+        const res = await fetch(`${API_BASE}/eda`, {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({video_url: url}),
+        });
+
+        if(!res.ok) {
+          const err = await res.json();
+          errorDiv.textContent = err.detail || "Failed to get EDA data.";
+          edaBtn.disabled = false;
+          edaBtn.textContent = "Analyze Transcript";
+          return;
+        }
+
+        const data = await res.json();
+        const eda = data.eda || {};
+
+        edaResultsDiv.innerHTML = `
+          <strong>Word Count:</strong> ${eda.word_count || 0}<br/>
+          <strong>Unique Words:</strong> ${eda.unique_words || 0}<br/>
+          <strong>Avg. Sentence Length:</strong> ${eda.avg_sentence_len || 0}<br/>
+          <strong>Sentiment (Polarity):</strong> ${eda.sentiment?.polarity || 0}<br/>
+          <strong>Sentiment (Subjectivity):</strong> ${eda.sentiment?.subjectivity || 0}<br/>
+          <strong>Top 20 Words:</strong> ${(eda.common_words || []).map(w=>w[0]).join(", ")}<br/>
+          <strong>Top 10 Keywords:</strong> ${(eda.tfidf_keywords || []).join(", ")}<br/>
+          <strong>Summary:</strong> ${data.summary || "Unavailable"}
+        `;
+
+        if(data.wordcloud_base64) {
+          wordcloudImg.src = "data:image/png;base64," + data.wordcloud_base64;
+          wordcloudImg.style.display = "block";
+        }
+      } catch(e) {
+        console.error(e);
+        errorDiv.textContent = "Network error or server unreachable.";
+      } finally {
+        edaBtn.disabled = false;
+        edaBtn.textContent = "Analyze Transcript";
+      }
+    });
+
+    // Benchmark button click
+    benchmarkBtn.addEventListener('click', async () => {
+      errorDiv.textContent = "";
+      benchmarkLog.textContent = "";
+
+      benchmarkBtn.disabled = true;
+      benchmarkBtn.textContent = "Loading...";
+
+      try {
+        const res = await fetch(`${API_BASE}/benchmark_log`);
+        if(!res.ok) {
+          errorDiv.textContent = "Failed to load benchmark log.";
+          benchmarkBtn.disabled = false;
+          benchmarkBtn.textContent = "Load Benchmark Log";
+          return;
+        }
+
+        const data = await res.json();
+        benchmarkLog.textContent = JSON.stringify(data.answers_log, null, 2);
+      } catch(e) {
+        console.error(e);
+        errorDiv.textContent = "Network error or server unreachable.";
+      } finally {
+        benchmarkBtn.disabled = false;
+        benchmarkBtn.textContent = "Load Benchmark Log";
+      }
+    });
+
+    // Submit question with Enter key, shift+enter for newline
+    questionInput.addEventListener('keydown', (e) => {
+      if(e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        askBtn.click();
+      }
+    });
+  </script>
 </body>
 </html>
