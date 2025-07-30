@@ -39,6 +39,13 @@ from sumy.summarizers.text_rank import TextRankSummarizer
 from deep_translator import GoogleTranslator
 import redis
 
+import textblob
+try:
+    textblob.download_corpora.download_all()
+except Exception:
+    pass
+
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("app")
 
