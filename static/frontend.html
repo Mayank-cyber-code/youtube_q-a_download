@@ -60,7 +60,7 @@
       overflow-wrap: break-word;
     }
     #wordcloud {
-      display: block;
+      display: none;
       max-width: 100%;
       margin: 1rem auto 0 auto;
       border-radius: 8px;
@@ -70,6 +70,7 @@
       margin-top: 1rem;
       color: red;
       font-weight: bold;
+      white-space: pre-wrap;
     }
     footer {
       margin-top: 3rem;
@@ -105,15 +106,13 @@
   <div id="error"></div>
   <div id="answer"></div>
 
-  <!-- EDA Section -->
   <div class="section">
     <h2>Exploratory Data Analysis</h2>
     <button id="eda-button">Analyze Transcript</button>
     <div id="edaResults"></div>
-    <img id="wordcloud" alt="Wordcloud" style="display:none;" />
+    <img id="wordcloud" alt="Wordcloud" />
   </div>
 
-  <!-- Benchmark Log Section -->
   <div class="section">
     <h2>Q&A Benchmark Log</h2>
     <button id="benchmark-button">Load Benchmark Log</button>
@@ -121,15 +120,19 @@
   </div>
 
   <footer>
-    Powered by your <a href="https://render.com" target="_blank" class="link">Render</a> backend and OpenAI
+    Powered by your <a href="https://render.com" target="_blank" class="link" rel="noopener noreferrer">Render</a> backend and OpenAI
   </footer>
 
   <script>
-    // Generate or get persistent session ID
+    // Persistent session ID generator
     function getSessionId() {
       let sessionId = localStorage.getItem('yt_qna_session_id');
       if (!sessionId) {
-        sessionId = crypto.randomUUID();
+        if ('randomUUID' in crypto) {
+          sessionId = crypto.randomUUID();
+        } else {
+          sessionId = Math.random().toString(36).substring(2) + Math.random().toString(36).substring(2);
+        }
         localStorage.setItem('yt_qna_session_id', sessionId);
       }
       return sessionId;
@@ -137,25 +140,47 @@
 
     const sessionId = getSessionId();
 
+    // Backend base URL — update this if your backend URL changes
+    const BACKEND_URL = "https://youtube-q-a-download.onrender.com";
+
+    // Element references
     const askButton = document.getElementById('ask-button');
     const edaButton = document.getElementById('eda-button');
     const benchmarkButton = document.getElementById('benchmark-button');
     const videoUrlInput = document.getElementById('video-url');
     const questionInput = document.getElementById('question');
-    const answerDiv = document.getElementById('answer');
     const errorDiv = document.getElementById('error');
+    const answerDiv = document.getElementById('answer');
     const edaResultsDiv = document.getElementById('edaResults');
     const wordcloudImg = document.getElementById('wordcloud');
     const benchmarkLogPre = document.getElementById('benchmarkLog');
 
+    // Update ask button enabled state based on inputs
+    function updateAskButtonState() {
+      askButton.disabled = !(videoUrlInput.value.trim() && questionInput.value.trim());
+    }
+
+    videoUrlInput.addEventListener('input', () => {
+      errorDiv.textContent = '';
+      updateAskButtonState();
+    });
+
+    questionInput.addEventListener('input', () => {
+      errorDiv.textContent = '';
+      updateAskButtonState();
+    });
+
+    updateAskButtonState();
+
+    // Handle Ask button click
     askButton.addEventListener('click', async () => {
       errorDiv.textContent = '';
       answerDiv.textContent = '';
 
-      const videoUrl = videoUrlInput.value.trim();
+      const video_url = videoUrlInput.value.trim();
       const question = questionInput.value.trim();
 
-      if (!videoUrl || !question) {
+      if (!video_url || !question) {
         errorDiv.textContent = 'Please enter both YouTube video URL and your question.';
         return;
       }
@@ -164,28 +189,30 @@
       askButton.textContent = 'Asking...';
 
       try {
-        const response = await fetch('/api/ask', {
+        const res = await fetch(`${BACKEND_URL}/api/ask`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ video_url: videoUrl, question, session_id: sessionId }),
+          body: JSON.stringify({ video_url, question, session_id: sessionId }),
         });
 
-        if (!response.ok) {
-          const err = await response.json();
-          errorDiv.textContent = err.detail || 'Error: Failed to get answer.';
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          errorDiv.textContent = err.detail || 'Failed to get answer.';
           return;
         }
 
-        const data = await response.json();
+        const data = await res.json();
 
-        if (data.error) {
-          errorDiv.textContent = data.error;
-        } else if (data.answer) {
+        if (data.answer) {
           answerDiv.textContent = data.answer;
+          if (data.latency_sec !== undefined) {
+            answerDiv.textContent += `\n\n(Response time: ${data.latency_sec} seconds)`;
+          }
         } else {
           answerDiv.textContent = 'No answer received. Try another question.';
         }
-      } catch (e) {
+      } catch (err) {
+        console.error(err);
         errorDiv.textContent = 'Network or server error. Please try again later.';
       } finally {
         askButton.disabled = false;
@@ -193,13 +220,15 @@
       }
     });
 
+    // Handle EDA button click
     edaButton.addEventListener('click', async () => {
       errorDiv.textContent = '';
       edaResultsDiv.textContent = '';
       wordcloudImg.style.display = 'none';
+      wordcloudImg.src = '';
 
-      const videoUrl = videoUrlInput.value.trim();
-      if (!videoUrl) {
+      const video_url = videoUrlInput.value.trim();
+      if (!video_url) {
         errorDiv.textContent = 'Please enter the YouTube video URL for EDA.';
         return;
       }
@@ -208,38 +237,41 @@
       edaButton.textContent = 'Analyzing...';
 
       try {
-        const response = await fetch('/api/eda', {
+        const res = await fetch(`${BACKEND_URL}/api/eda`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ video_url: videoUrl }),
+          body: JSON.stringify({ video_url }),
         });
 
-        if (!response.ok) {
-          const err = await response.json();
-          errorDiv.textContent = err.detail || 'Error: Failed to get EDA.';
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          errorDiv.textContent = err.detail || 'Failed to get EDA.';
           return;
         }
 
-        const data = await response.json();
+        const data = await res.json();
 
-        let edaHtml = `
-          <strong>Word Count:</strong> ${data.eda.word_count} <br/>
-          <strong>Unique Words:</strong> ${data.eda.unique_words} <br/>
-          <strong>Avg. Sentence Length:</strong> ${data.eda.avg_sentence_len} <br/>
-          <strong>Sentiment (Polarity):</strong> ${data.eda.sentiment.polarity} <br/>
-          <strong>Sentiment (Subjectivity):</strong> ${data.eda.sentiment.subjectivity} <br/>
-          <strong>Top Common Words:</strong> ${data.eda.common_words.map(w => w[0]).join(', ')} <br/>
-          <strong>TF-IDF Keywords:</strong> ${data.eda.tfidf_keywords.join(', ')} <br/>
-          <strong>Summary:</strong> ${data.summary}
+        const eda = data.eda || {};
+        const commonWords = eda.common_words ? eda.common_words.map(w => w[0]).join(', ') : '';
+        const tfidfKeywords = eda.tfidf_keywords ? eda.tfidf_keywords.join(', ') : '';
+
+        edaResultsDiv.innerHTML = `
+          <strong>Word Count:</strong> ${eda.word_count || 0} <br/>
+          <strong>Unique Words:</strong> ${eda.unique_words || 0} <br/>
+          <strong>Avg. Sentence Length:</strong> ${eda.avg_sentence_len || 0} <br/>
+          <strong>Sentiment (Polarity):</strong> ${eda.sentiment?.polarity || 0} <br/>
+          <strong>Sentiment (Subjectivity):</strong> ${eda.sentiment?.subjectivity || 0} <br/>
+          <strong>Top Common Words:</strong> ${commonWords} <br/>
+          <strong>TF-IDF Keywords:</strong> ${tfidfKeywords} <br/>
+          <strong>Summary:</strong> ${data.summary || 'Unavailable'}
         `;
-
-        edaResultsDiv.innerHTML = edaHtml;
 
         if (data.wordcloud_base64) {
           wordcloudImg.src = "data:image/png;base64," + data.wordcloud_base64;
-          wordcloudImg.style.display = '';
+          wordcloudImg.style.display = 'block';
         }
-      } catch (e) {
+      } catch (err) {
+        console.error(err);
         errorDiv.textContent = 'Network or server error. Please try again later.';
       } finally {
         edaButton.disabled = false;
@@ -247,21 +279,27 @@
       }
     });
 
+    // Handle Benchmark button click
     benchmarkButton.addEventListener('click', async () => {
       errorDiv.textContent = '';
       benchmarkLogPre.textContent = '';
+
       benchmarkButton.disabled = true;
       benchmarkButton.textContent = 'Loading...';
 
       try {
-        const response = await fetch('/api/benchmark_log');
-        if (!response.ok) {
-          errorDiv.textContent = 'Error loading benchmark log.';
+        const res = await fetch(`${BACKEND_URL}/api/benchmark_log`);
+
+        if (!res.ok) {
+          errorDiv.textContent = 'Failed to load benchmark log.';
           return;
         }
-        const data = await response.json();
+
+        const data = await res.json();
+
         benchmarkLogPre.textContent = JSON.stringify(data.answers_log, null, 2);
-      } catch (e) {
+      } catch (err) {
+        console.error(err);
         errorDiv.textContent = 'Network or server error. Please try again later.';
       } finally {
         benchmarkButton.disabled = false;
@@ -269,10 +307,10 @@
       }
     });
 
-    // Allow pressing Enter in question textarea to submit (Shift+Enter for new line)
-    questionInput.addEventListener('keydown', (event) => {
-      if (event.key === 'Enter' && !event.shiftKey) {
-        event.preventDefault();
+    // Submit question on Enter keypress (Shift+Enter for new line)
+    questionInput.addEventListener('keydown', (e) => {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
         askButton.click();
       }
     });
