@@ -45,7 +45,6 @@ try:
 except Exception:
     pass
 
-
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("app")
 
@@ -121,9 +120,9 @@ def download_subtitles(video_url: str, tmpdir: str):
     video_id = extract_video_id(video_url)
 
     # Format ScraperAPI proxy URL for yt-dlp
-    scraper_proxy = None
+    proxy_base_url = None
     if SCRAPERAPI_KEY:
-        scraper_proxy = f"http://api.scraperapi.com?api_key={SCRAPERAPI_KEY}&url="
+        proxy_base_url = f"http://api.scraperapi.com?api_key={SCRAPERAPI_KEY}&url="
 
     ydl_opts = {
         "skip_download": True,
@@ -136,9 +135,10 @@ def download_subtitles(video_url: str, tmpdir: str):
         "no_warnings": True,
     }
 
-    if scraper_proxy:
-        ydl_opts["proxy"] = scraper_proxy
-        logger.info(f"Using ScraperAPI proxy: {scraper_proxy}")
+    # Pass only base proxy URL, yt-dlp appends video URL automatically
+    if proxy_base_url:
+        ydl_opts["proxy"] = proxy_base_url
+        logger.info(f"Using ScraperAPI proxy base URL: {proxy_base_url}")
 
     if os.path.exists(COOKIES_PATH):
         ydl_opts["cookiefile"] = COOKIES_PATH
@@ -148,13 +148,12 @@ def download_subtitles(video_url: str, tmpdir: str):
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(video_url, download=True)
 
-        # Check and return subtitle file path
         path_vtt = Path(tmpdir) / f"{video_id}.en.vtt"
         if path_vtt.exists():
-            logger.info(f"Subtitle file found: {path_vtt}")
+            logger.info(f"Subtitle file found at: {path_vtt}")
             return str(path_vtt), info
 
-        # fallback to first .vtt in tmpdir
+        # fallback to first available VTT file in tmpdir
         for file in Path(tmpdir).glob("*.vtt"):
             logger.info(f"Using fallback subtitle: {file}")
             return str(file), info
@@ -171,7 +170,7 @@ def parse_subtitle(vtt_path: str) -> str:
     if not vtt_path or not Path(vtt_path).exists():
         return ""
     try:
-        captions = [c.text.strip() for c in webvtt.read(vtt_path) if c.text.strip()]
+        captions = [caption.text.strip() for caption in webvtt.read(vtt_path) if caption.text.strip()]
         return " ".join(captions)
     except Exception as e:
         logger.warning(f"Failed to parse VTT subtitle: {e}")
@@ -193,8 +192,7 @@ def fetch_wikipedia_summary(query: str) -> str:
         results = wikipedia.search(query)
         if not results:
             return ""
-        summary = wikipedia.summary(results[0], sentences=5)
-        return summary
+        return wikipedia.summary(results[0], sentences=5)
     except Exception:
         return ""
 
@@ -209,12 +207,12 @@ def perform_eda(text: str):
     common_words = Counter(filtered_words).most_common(20)
     vectorizer = TfidfVectorizer(stop_words="english", max_features=1000)
     tfidf_matrix = vectorizer.fit_transform([text])
-    features = vectorizer.get_feature_names_out()
+    feature_names = vectorizer.get_feature_names_out()
     scores = tfidf_matrix.data
     indices = tfidf_matrix.indices
     tfidf_scores = list(zip(indices, scores))
     tfidf_scores.sort(key=lambda x: x[1], reverse=True)
-    keywords = [features[i] for i, _ in tfidf_scores[:10]]
+    keywords = [feature_names[i] for i, _ in tfidf_scores[:10]]
     blob = TextBlob(text)
     sentiment = blob.sentiment
     return {
@@ -223,16 +221,13 @@ def perform_eda(text: str):
         "avg_sentence_len": round(avg_sentence_len, 2),
         "common_words": common_words,
         "tfidf_keywords": keywords,
-        "sentiment": {
-            "polarity": round(sentiment.polarity, 3),
-            "subjectivity": round(sentiment.subjectivity, 3),
-        },
+        "sentiment": {"polarity": round(sentiment.polarity, 3), "subjectivity": round(sentiment.subjectivity, 3)},
     }
 
 def create_wordcloud_image(text: str) -> str:
-    cloud = WordCloud(width=800, height=400, background_color="white").generate(text)
+    wc = WordCloud(width=800, height=400, background_color="white").generate(text)
     buf = BytesIO()
-    cloud.to_image().save(buf, format="PNG")
+    wc.to_image().save(buf, format="PNG")
     return base64.b64encode(buf.getvalue()).decode()
 
 def summarize_text(text: str, sentences=5) -> str:
@@ -255,25 +250,30 @@ def load_vectorstore(path: Path, embeddings) -> FAISS | None:
     try:
         return FAISS.load_local(str(path), embeddings)
     except Exception as e:
-        logger.warning(f"Loading vectorstore failed: {e}")
+        logger.warning(f"Error loading vectorstore: {e}")
         return None
 
-# --- Memory helpers ---
+# Session memory helpers
 from langchain.schema import messages_from_dict, messages_to_dict
 
 def get_memory(session_id: str) -> ConversationBufferMemory:
     data = redis_get_json(f"memory:{session_id}")
     messages = messages_from_dict(data) if data else []
-    return ConversationBufferMemory(memory_key="chat_history", return_messages=True, messages=messages)
+    memory = ConversationBufferMemory(memory_key="chat_history", return_messages=True, messages=messages)
+    return memory
 
 def save_memory(session_id: str, memory: ConversationBufferMemory):
     messages = memory.load_memory_messages() if hasattr(memory, "load_memory_messages") else []
     redis_set_json(f"memory:{session_id}", messages_to_dict(messages))
 
-# --- API endpoints ---
+# API endpoints
 @app.post("/api/ask")
 async def api_ask(request: Request):
-    data = await request.json()
+    try:
+        data = await request.json()
+    except Exception:
+        raise HTTPException(400, "Invalid JSON")
+
     video_url = (data.get("video_url") or "").strip()
     question = (data.get("question") or "").strip()
     session_id = (data.get("session_id") or "default").strip()
@@ -305,7 +305,7 @@ async def api_ask(request: Request):
             redis_set_json(metadata_key, metadata)
 
             docs = [Document(page_content=transcript, metadata={"source": video_url})]
-            splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100)  # fixed param
+            splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
             chunks = splitter.split_documents(docs)
             vectorstore = FAISS.from_documents(chunks, embeddings)
             save_vectorstore(vectorstore, vectorstore_dir)
@@ -335,7 +335,11 @@ async def api_ask(request: Request):
 
 @app.post("/api/eda")
 async def api_eda(request: Request):
-    data = await request.json()
+    try:
+        data = await request.json()
+    except Exception:
+        raise HTTPException(400, "Invalid JSON")
+
     video_url = (data.get("video_url") or "").strip()
 
     if not video_url:
@@ -360,7 +364,7 @@ async def api_eda(request: Request):
         summary = summarize_text(transcript, 5)
     except Exception as e:
         logger.warning(f"Summarization failure: {e}")
-        summary = "Summary not available."
+        summary = "Summary unavailable"
 
     return JSONResponse({
         "eda": eda_results,
