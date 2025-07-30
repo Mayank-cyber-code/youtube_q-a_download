@@ -16,3 +16,4 @@ textblob
 sumy
 redis
 deep-translator
+textblob
