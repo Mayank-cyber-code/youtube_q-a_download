@@ -47,7 +47,7 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 if not OPENAI_API_KEY:
     raise Exception("Missing OPENAI_API_KEY environment variable")
 
-SCRAPERAPI_KEY = os.getenv("SCRAPERAPI_KEY", "840841f6e68a37b9a298ceed6161481")  # Use your key
+SCRAPERAPI_KEY = os.getenv("SCRAPERAPI_KEY", "840841f3a6e68c37a29881d961d5c481")
 
 COOKIES_PATH = "cookies.txt"
 YTDLP_COOKIES_CONTENT = os.getenv("YTDLP_COOKIES_CONTENT")
@@ -67,8 +67,7 @@ def redis_set_str(key: str, val: str):
     redis_client.set(key, val)
 
 def redis_get_str(key: str):
-    val = redis_client.get(key)
-    return val
+    return redis_client.get(key)
 
 def redis_set_json(key: str, val):
     redis_client.set(key, json.dumps(val))
@@ -88,12 +87,12 @@ def get_list(key: str):
         return []
     return [json.loads(item) for item in items]
 
-# --- FastAPI Init ---
+# --- FastAPI app ---
 app = FastAPI(debug=True)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Adjust in production
+    allow_origins=["*"],  # Adjust for production usage
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -103,10 +102,10 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 # --- Utility functions ---
 def extract_video_id(url: str) -> str:
     patterns = [
-        r"(?:v=|\/videos\/|embed\/|youtu\.be|shorts)\/?([a-zA-Z0-9_-]{11})"
+        r"(?:v=|\/videos\/|embed\/|youtu\.be\/|shorts\/)([a-zA-Z0-9_-]{11})"
     ]
-    for p in patterns:
-        m = re.search(p, url)
+    for pat in patterns:
+        m = re.search(pat, url)
         if m:
             return m.group(1)
     raise ValueError("Could not extract YouTube video ID")
@@ -114,8 +113,10 @@ def extract_video_id(url: str) -> str:
 def download_subtitles(video_url: str, tmpdir: str):
     video_id = extract_video_id(video_url)
 
-    # ScraperAPI proxy URL
-    scraper_proxy = f"http://api.scraperapi.com?api_key={SCRAPERAPI_KEY}&url=" if SCRAPERAPI_KEY else None
+    # Format ScraperAPI proxy URL for yt-dlp
+    scraper_proxy = None
+    if SCRAPERAPI_KEY:
+        scraper_proxy = f"http://api.scraperapi.com?api_key={SCRAPERAPI_KEY}&url="
 
     ydl_opts = {
         "skip_download": True,
@@ -130,6 +131,7 @@ def download_subtitles(video_url: str, tmpdir: str):
 
     if scraper_proxy:
         ydl_opts["proxy"] = scraper_proxy
+        logger.info(f"Using ScraperAPI proxy: {scraper_proxy}")
 
     if os.path.exists(COOKIES_PATH):
         ydl_opts["cookiefile"] = COOKIES_PATH
@@ -138,20 +140,23 @@ def download_subtitles(video_url: str, tmpdir: str):
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(video_url, download=True)
-        # Check subtitle file
+
+        # Check and return subtitle file path
         path_vtt = Path(tmpdir) / f"{video_id}.en.vtt"
         if path_vtt.exists():
-            logger.info(f"Subtitle downloaded: {path_vtt}")
+            logger.info(f"Subtitle file found: {path_vtt}")
             return str(path_vtt), info
-        # fallback: any vtt in tmpdir
+
+        # fallback to first .vtt in tmpdir
         for file in Path(tmpdir).glob("*.vtt"):
             logger.info(f"Using fallback subtitle: {file}")
             return str(file), info
+
     except Exception as e:
-        msg = str(e).lower()
-        if ("confirm" in msg and "bot" in msg) or "authentication" in msg or "sign in" in msg:
-            logger.warning("Video requires authentication (cookies)")
-            raise HTTPException(403, "Video requires authentication (cookies)")
+        err_text = str(e).lower()
+        if ("confirm" in err_text and "bot" in err_text) or "authentication" in err_text or "sign in" in err_text:
+            logger.warning("YouTube video requires authentication (cookies).")
+            raise HTTPException(403, "YouTube video requires authentication (cookies).")
         logger.warning(f"yt-dlp subtitle download failed: {e}")
     return None, None
 
@@ -162,7 +167,7 @@ def parse_subtitle(vtt_path: str) -> str:
         captions = [c.text.strip() for c in webvtt.read(vtt_path) if c.text.strip()]
         return " ".join(captions)
     except Exception as e:
-        logger.warning(f"Parsing subtitles failed: {e}")
+        logger.warning(f"Failed to parse VTT subtitle: {e}")
         return ""
 
 def translate_to_english(text: str) -> str:
@@ -173,7 +178,7 @@ def translate_to_english(text: str) -> str:
         logger.info("Translated transcript to English.")
         return translated
     except Exception as e:
-        logger.warning(f"Translation error: {e}")
+        logger.warning(f"Translation failed: {e}")
         return text
 
 def fetch_wikipedia_summary(query: str) -> str:
@@ -190,8 +195,8 @@ def perform_eda(text: str):
     words = re.findall(r"\b\w+\b", text.lower())
     word_count = len(words)
     unique_words = len(set(words))
-    sentences = text.split('.')
-    avg_sentence_len = word_count / max(len(sentences), 1)
+    sentences = [s for s in text.split('.') if s.strip()]
+    avg_sentence_len = word_count / max(1, len(sentences))
     stopwords = set("the and is to a of in that it for on you with as this was but are have be at or from".split())
     filtered_words = [w for w in words if w not in stopwords]
     common_words = Counter(filtered_words).most_common(20)
@@ -211,14 +216,17 @@ def perform_eda(text: str):
         "avg_sentence_len": round(avg_sentence_len, 2),
         "common_words": common_words,
         "tfidf_keywords": keywords,
-        "sentiment": {"polarity": round(sentiment.polarity, 3), "subjectivity": round(sentiment.subjectivity, 3)}
+        "sentiment": {
+            "polarity": round(sentiment.polarity, 3),
+            "subjectivity": round(sentiment.subjectivity, 3),
+        },
     }
 
 def create_wordcloud_image(text: str) -> str:
     cloud = WordCloud(width=800, height=400, background_color="white").generate(text)
     buf = BytesIO()
     cloud.to_image().save(buf, format="PNG")
-    return buf.getvalue().hex()
+    return base64.b64encode(buf.getvalue()).decode()
 
 def summarize_text(text: str, sentences=5) -> str:
     if not text.strip() or len(text.split()) < 20:
@@ -243,7 +251,7 @@ def load_vectorstore(path: Path, embeddings) -> FAISS | None:
         logger.warning(f"Loading vectorstore failed: {e}")
         return None
 
-# --- Session Memory Helpers ---
+# --- Memory helpers ---
 from langchain.schema import messages_from_dict, messages_to_dict
 
 def get_memory(session_id: str) -> ConversationBufferMemory:
@@ -252,16 +260,16 @@ def get_memory(session_id: str) -> ConversationBufferMemory:
     return ConversationBufferMemory(memory_key="chat_history", return_messages=True, messages=messages)
 
 def save_memory(session_id: str, memory: ConversationBufferMemory):
-    messages = memory.load_memory_variables({}).get("history", [])
+    messages = memory.load_memory_messages() if hasattr(memory, "load_memory_messages") else []
     redis_set_json(f"memory:{session_id}", messages_to_dict(messages))
 
 # --- API endpoints ---
 @app.post("/api/ask")
 async def api_ask(request: Request):
     data = await request.json()
-    video_url = data.get("video_url", "").strip()
-    question = data.get("question", "").strip()
-    session_id = data.get("session_id", "default").strip()
+    video_url = (data.get("video_url") or "").strip()
+    question = (data.get("question") or "").strip()
+    session_id = (data.get("session_id") or "default").strip()
 
     if not video_url or not question:
         raise HTTPException(400, "Missing video_url or question")
@@ -290,7 +298,7 @@ async def api_ask(request: Request):
             redis_set_json(metadata_key, metadata)
 
             docs = [Document(page_content=transcript, metadata={"source": video_url})]
-            splitter = RecursiveCharacterTextSplitter(chunk_size=1000, overlap=100)
+            splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100)  # fixed param
             chunks = splitter.split_documents(docs)
             vectorstore = FAISS.from_documents(chunks, embeddings)
             save_vectorstore(vectorstore, vectorstore_dir)
@@ -321,7 +329,7 @@ async def api_ask(request: Request):
 @app.post("/api/eda")
 async def api_eda(request: Request):
     data = await request.json()
-    video_url = data.get("video_url", "").strip()
+    video_url = (data.get("video_url") or "").strip()
 
     if not video_url:
         raise HTTPException(400, "Missing video_url")
