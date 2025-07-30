@@ -17,3 +17,4 @@ sumy
 redis
 deep-translator
 textblob
+langchain-text-splitters
